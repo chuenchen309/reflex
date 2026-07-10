@@ -2170,6 +2170,19 @@ def is_computed_var(obj: Any) -> TypeGuard[ComputedVar]:
     return isinstance(obj, FakeComputedVarBaseClass)
 
 
+# Incremented whenever a cached computed var is recomputed. State dirty
+# propagation uses this to know when an already-propagated dependency needs to
+# be re-propagated (a recompute re-materializes a cache that a later mutation
+# of its dependencies must invalidate again).
+_computed_var_recompute_generation: int = 0
+
+
+def _bump_computed_var_recompute_generation() -> None:
+    """Record that a cached computed var was recomputed."""
+    global _computed_var_recompute_generation
+    _computed_var_recompute_generation += 1
+
+
 @dataclasses.dataclass(
     eq=False,
     frozen=True,
@@ -2511,6 +2524,7 @@ class ComputedVar(Var[RETURN_TYPE]):
                 instance._was_touched = True
                 # Set the last updated timestamp on the state instance.
                 setattr(instance, self._last_updated_attr, datetime.datetime.now())
+                _bump_computed_var_recompute_generation()
             value = getattr(instance, self._cache_attr)
 
         self._check_deprecated_return_type(instance, value)
@@ -2773,6 +2787,7 @@ class AsyncComputedVar(ComputedVar[RETURN_TYPE]):
                 instance._was_touched = True
                 # Set the last updated timestamp on the state instance.
                 setattr(instance, self._last_updated_attr, datetime.datetime.now())
+                _bump_computed_var_recompute_generation()
             value = getattr(instance, self._cache_attr)
             self._check_deprecated_return_type(instance, value)
             return value

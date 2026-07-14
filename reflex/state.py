@@ -445,6 +445,13 @@ class BaseState(EvenMoreBasicBaseState):
     # Whether the state has ever been touched since instantiation.
     _was_touched: bool = field(default=False, is_var=False)
 
+    # Dirty vars whose dependency closure was already propagated this cycle.
+    # Transient: cleared by _clean and never pickled.
+    _propagated_dirty_vars: set[str] = field(default_factory=set, is_var=False)
+
+    # Recompute generation the propagation frontier was built in.
+    _propagated_generation: int = field(default=0, is_var=False)
+
     # A special event handler for setting base vars.
     setvar: ClassVar[EventHandler]
 
@@ -1832,14 +1839,11 @@ class BaseState(EvenMoreBasicBaseState):
         # mutation must invalidate again, so the frontier is only valid for
         # the recompute generation it was built in.
         instance_dict = self.__dict__
-        propagated = instance_dict.get("_propagated_dirty_vars")
+        propagated = instance_dict["_propagated_dirty_vars"]
         current_gen = reflex_base_vars_base._computed_var_recompute_generation
-        if propagated is None:
-            propagated = set()
-            object.__setattr__(self, "_propagated_dirty_vars", propagated)
-        elif instance_dict.get("_propagated_generation") != current_gen:
+        if instance_dict["_propagated_generation"] != current_gen:
             propagated.clear()
-        object.__setattr__(self, "_propagated_generation", current_gen)
+            object.__setattr__(self, "_propagated_generation", current_gen)
 
         new_dirty = self.dirty_vars - propagated
         while new_dirty:
@@ -1994,7 +1998,7 @@ class BaseState(EvenMoreBasicBaseState):
         self.dirty_vars = set()
         self.dirty_substates = set()
         # Discard the propagation frontier along with the dirty vars it tracked.
-        self.__dict__.pop("_propagated_dirty_vars", None)
+        self.__dict__["_propagated_dirty_vars"].clear()
 
     def get_value(self, key: str) -> Any:
         """Get the value of a field (without proxying).
@@ -2130,6 +2134,9 @@ class BaseState(EvenMoreBasicBaseState):
         """
         state["parent_state"] = None
         state["substates"] = {}
+        # The propagation frontier is never pickled; recreate it on restore.
+        state.setdefault("_propagated_dirty_vars", set())
+        state.setdefault("_propagated_generation", 0)
         for key, value in state.items():
             object.__setattr__(self, key, value)
 
